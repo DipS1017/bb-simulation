@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { FORMATIONS, type FormationKey, type PlayerPos } from "../data/formations";
 import { SLIDES, type DefenseKey, type Slide } from "../data/defenseSlides";
 import { classifyBall, isLeftHalf, mirrorX, type BallZone } from "../data/ballZones";
+import { PLAYS, type PlayOutcome, findPlay } from "../data/plays";
 
 export type DefenderId = "X1" | "X2" | "X3" | "X4" | "X5";
 const DEFENDER_IDS: DefenderId[] = ["X1", "X2", "X3", "X4", "X5"];
@@ -21,6 +22,14 @@ type SimState = {
   showShotQuality: boolean;
   showZones: boolean;
 
+  // Playbook state
+  activePlayId: string | null;
+  outcome: PlayOutcome;
+  currentStep: number;       // index of the step that has been (or is being) applied
+  isPlaying: boolean;
+  playSpeed: 0.5 | 1 | 2;
+
+  // Sandbox actions
   passTo: (playerId: string) => void;
   moveOffense: (playerId: string, x: number, y: number) => void;
   setDefense: (d: DefenseKey) => void;
@@ -28,13 +37,23 @@ type SimState = {
   reset: () => void;
   toggleShotQuality: () => void;
   toggleZones: () => void;
+
+  // Playbook actions
+  loadPlay: (playId: string, outcome?: PlayOutcome) => void;
+  setOutcome: (o: PlayOutcome) => void;
+  play: () => void;
+  pause: () => void;
+  togglePlay: () => void;
+  stepForward: () => void;
+  stepBack: () => void;
+  rewindPlay: () => void;
+  setPlaySpeed: (n: 0.5 | 1 | 2) => void;
+  exitPlay: () => void;
 };
 
-// Timer for the "closeout then recover" animation; cleared whenever state
-// that invalidates the in-flight closeout changes.
 let closeoutTimer: ReturnType<typeof setTimeout> | null = null;
 const CLOSEOUT_MS = 420;
-const CLOSEOUT_OFFSET = 22; // defender stops ~22u from the receiver on closeout
+const CLOSEOUT_OFFSET = 22;
 
 function clearCloseout() {
   if (closeoutTimer) {
@@ -58,9 +77,6 @@ function deriveFromBall(ball: PlayerPos, defense: DefenseKey) {
   return { ballZone: zone, onLeftHalf: left, defenders };
 }
 
-// Build the defenders array with the nearest defender to `receiver` lunging
-// into a closeout position. Returns both the closeout-state defenders and the
-// home-state defenders so the caller can schedule the recovery.
 function withCloseout(homeDefenders: DefenderPos[], receiver: PlayerPos) {
   let nearestIdx = 0;
   let minD = Infinity;
@@ -95,12 +111,39 @@ function initialState(formation: FormationKey, defense: DefenseKey) {
   };
 }
 
+// Simulate applying steps 0..targetStep non-animated and return the resulting
+// offensive positions + ball holder. Used by rewindToStep to snap back without
+// replaying animations.
+function simulateUpTo(playId: string, outcome: PlayOutcome, targetStep: number) {
+  const play = findPlay(playId);
+  if (!play) return null;
+  const steps = play[outcome];
+  let offense = FORMATIONS[play.formation].map((p) => ({ ...p }));
+  let ballHolder = offense[0].id;
+  for (let i = 0; i <= targetStep && i < steps.length; i++) {
+    for (const a of steps[i].actions) {
+      if (a.kind === "move") {
+        offense = offense.map((p) => (p.id === a.id ? { ...p, x: a.x, y: a.y } : p));
+      } else if (a.kind === "pass") {
+        ballHolder = a.to;
+      }
+    }
+  }
+  return { offense, ballHolder, play };
+}
+
 export const useSim = create<SimState>((set, get) => ({
   ...initialState("5-out", "2-3"),
   prevDefenders: null,
   passId: 0,
   showShotQuality: false,
   showZones: false,
+
+  activePlayId: null,
+  outcome: "offenseWins",
+  currentStep: -1,
+  isPlaying: false,
+  playSpeed: 1,
 
   passTo: (playerId) => {
     const { offense, activeDefense, defenders: currentDefenders, passId } = get();
@@ -137,6 +180,7 @@ export const useSim = create<SimState>((set, get) => ({
   },
 
   setDefense: (d) => {
+    if (get().activePlayId) return; // locked during a play
     const { offense, ballHolder } = get();
     clearCloseout();
     const holder = offense.find((o) => o.id === ballHolder) ?? offense[0];
@@ -144,16 +188,131 @@ export const useSim = create<SimState>((set, get) => ({
   },
 
   setFormation: (f) => {
+    if (get().activePlayId) return;
     clearCloseout();
     set({ ...initialState(f, get().activeDefense), prevDefenders: null });
   },
 
   reset: () => {
     clearCloseout();
-    const { activeDefense, activeFormation } = get();
+    const { activeDefense, activeFormation, activePlayId } = get();
+    if (activePlayId) {
+      // While a play is loaded, reset means "rewind play to start"
+      get().rewindPlay();
+      return;
+    }
     set({ ...initialState(activeFormation, activeDefense), prevDefenders: null });
   },
 
   toggleShotQuality: () => set((s) => ({ showShotQuality: !s.showShotQuality })),
   toggleZones: () => set((s) => ({ showZones: !s.showZones })),
+
+  // ---------- Playbook ----------
+
+  loadPlay: (playId, outcome = "offenseWins") => {
+    const play = findPlay(playId);
+    if (!play) return;
+    clearCloseout();
+    const offense = FORMATIONS[play.formation].map((p) => ({ ...p }));
+    const ballHolder = offense[0].id;
+    const ball = offense[0];
+    set({
+      offense,
+      ballHolder,
+      activeFormation: play.formation,
+      activeDefense: play.vsDefense,
+      ...deriveFromBall(ball, play.vsDefense),
+      prevDefenders: null,
+      passId: 0,
+      activePlayId: playId,
+      outcome,
+      currentStep: -1,
+      isPlaying: false,
+    });
+  },
+
+  setOutcome: (o) => {
+    const { activePlayId } = get();
+    if (!activePlayId) return;
+    get().loadPlay(activePlayId, o);
+  },
+
+  play: () => {
+    const { activePlayId, outcome, currentStep } = get();
+    if (!activePlayId) return;
+    const p = findPlay(activePlayId);
+    if (!p) return;
+    const steps = p[outcome];
+    if (currentStep >= steps.length - 1 && currentStep >= 0) {
+      // Ended — restart from step 0
+      get().loadPlay(activePlayId, outcome);
+      set({ isPlaying: true, currentStep: 0 });
+      return;
+    }
+    if (currentStep < 0) {
+      // Not started — kick off at step 0
+      set({ isPlaying: true, currentStep: 0 });
+      return;
+    }
+    // Mid-play resume
+    set({ isPlaying: true });
+  },
+  pause: () => set({ isPlaying: false }),
+  togglePlay: () => {
+    const { isPlaying } = get();
+    if (isPlaying) get().pause();
+    else get().play();
+  },
+
+  stepForward: () => {
+    const { activePlayId, outcome, currentStep } = get();
+    const play = activePlayId ? findPlay(activePlayId) : null;
+    if (!play) return;
+    const steps = play[outcome];
+    if (currentStep + 1 >= steps.length) return;
+    set({ currentStep: currentStep + 1, isPlaying: false });
+  },
+
+  stepBack: () => {
+    const { activePlayId, outcome, currentStep } = get();
+    if (!activePlayId || currentStep < 0) return;
+    const target = currentStep - 1;
+    if (target < -1) return;
+    if (target === -1) {
+      get().rewindPlay();
+      return;
+    }
+    const sim = simulateUpTo(activePlayId, outcome, target);
+    if (!sim) return;
+    const holder = sim.offense.find((p) => p.id === sim.ballHolder) ?? sim.offense[0];
+    clearCloseout();
+    set({
+      offense: sim.offense,
+      ballHolder: sim.ballHolder,
+      ...deriveFromBall(holder, sim.play.vsDefense),
+      prevDefenders: null,
+      currentStep: target,
+      isPlaying: false,
+    });
+  },
+
+  rewindPlay: () => {
+    const { activePlayId, outcome } = get();
+    if (!activePlayId) return;
+    get().loadPlay(activePlayId, outcome);
+  },
+
+  setPlaySpeed: (n) => set({ playSpeed: n }),
+
+  exitPlay: () => {
+    clearCloseout();
+    set({
+      activePlayId: null,
+      isPlaying: false,
+      currentStep: -1,
+      outcome: "offenseWins",
+    });
+  },
 }));
+
+export { PLAYS };

@@ -1,6 +1,7 @@
 import { useSim } from "../store/useSim";
 import { DEFENSE_KEYS, DEFENSE_LABEL, type DefenseKey } from "../data/defenseSlides";
 import { FORMATION_KEYS, type FormationKey } from "../data/formations";
+import { Playbook } from "./Playbook";
 
 const FORMATION_LABEL: Record<FormationKey, string> = {
   "5-out": "5-Out",
@@ -17,11 +18,14 @@ export function ControlsPanel() {
   const onLeftHalf = useSim((s) => s.onLeftHalf);
   const showShotQuality = useSim((s) => s.showShotQuality);
   const showZones = useSim((s) => s.showZones);
+  const activePlayId = useSim((s) => s.activePlayId);
   const setDefense = useSim((s) => s.setDefense);
   const setFormation = useSim((s) => s.setFormation);
   const reset = useSim((s) => s.reset);
   const toggleShotQuality = useSim((s) => s.toggleShotQuality);
   const toggleZones = useSim((s) => s.toggleZones);
+
+  const locked = !!activePlayId;
 
   return (
     <aside style={panelStyle}>
@@ -31,12 +35,15 @@ export function ControlsPanel() {
         defenders auto-slide to their zone rules.
       </p>
 
-      <Section title="Defense">
+      <Playbook />
+
+      <Section title="Defense" dimmed={locked}>
         <div style={gridStyle}>
           {DEFENSE_KEYS.map((d) => (
             <Pill
               key={d}
               active={activeDefense === d}
+              disabled={locked}
               onClick={() => setDefense(d as DefenseKey)}
               label={DEFENSE_LABEL[d]}
             />
@@ -44,12 +51,13 @@ export function ControlsPanel() {
         </div>
       </Section>
 
-      <Section title="Offensive Set">
+      <Section title="Offensive Set" dimmed={locked}>
         <div style={gridStyle}>
           {FORMATION_KEYS.map((f) => (
             <Pill
               key={f}
               active={activeFormation === f}
+              disabled={locked}
               onClick={() => setFormation(f as FormationKey)}
               label={FORMATION_LABEL[f]}
             />
@@ -116,24 +124,39 @@ export function ControlsPanel() {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title, children, dimmed = false,
+}: {
+  title: string;
+  children: React.ReactNode;
+  dimmed?: boolean;
+}) {
   return (
-    <section style={{ marginBottom: 18 }}>
+    <section style={{ marginBottom: 18, opacity: dimmed ? 0.45 : 1, pointerEvents: dimmed ? "none" : "auto" }}>
       <h3 style={h3Style}>{title}</h3>
       {children}
     </section>
   );
 }
 
-function Pill({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+function Pill({
+  active, onClick, label, disabled = false,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  disabled?: boolean;
+}) {
   return (
     <button
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
       style={{
         ...pillStyle,
         background: active ? "#2563eb" : "#1f2937",
         color: active ? "white" : "#d1d5db",
         borderColor: active ? "#60a5fa" : "#374151",
+        cursor: disabled ? "not-allowed" : "pointer",
       }}
     >
       {label}

@@ -6,19 +6,18 @@ import { useSim, type DefenderPos } from "../store/useSim";
 type OffenseProps = {
   p: PlayerPos;
   hasBall: boolean;
+  interactive: boolean;
   onPass: (id: string) => void;
   onMove: (id: string, x: number, y: number) => void;
 };
 
-// Distance thresholds (in SVG units, 1ft = 10u). Tuned so that a defender
-// within ~3.5ft = contested, within ~6.5ft = guarded, else open.
 const CONTESTED = 35;
 const GUARDED = 65;
 
 function qualityColor(dist: number): string {
-  if (dist <= CONTESTED) return "#22c55e"; // green - well contested
-  if (dist <= GUARDED)   return "#eab308"; // yellow - some pressure
-  return "#ef4444";                         // red - wide open
+  if (dist <= CONTESTED) return "#22c55e";
+  if (dist <= GUARDED)   return "#eab308";
+  return "#ef4444";
 }
 
 function screenToSvg(svg: SVGSVGElement, clientX: number, clientY: number) {
@@ -31,7 +30,7 @@ function screenToSvg(svg: SVGSVGElement, clientX: number, clientY: number) {
   return { x: p.x, y: p.y };
 }
 
-export function OffenseDot({ p, hasBall, onPass, onMove }: OffenseProps) {
+export function OffenseDot({ p, hasBall, interactive, onPass, onMove }: OffenseProps) {
   const [dragging, setDragging] = useState(false);
   const movedRef = useRef(false);
   const startRef = useRef<{ x: number; y: number } | null>(null);
@@ -47,6 +46,7 @@ export function OffenseDot({ p, hasBall, onPass, onMove }: OffenseProps) {
   }
 
   const onPointerDown = (e: React.PointerEvent<SVGCircleElement>) => {
+    if (!interactive) return;
     (e.currentTarget as SVGCircleElement).setPointerCapture(e.pointerId);
     movedRef.current = false;
     startRef.current = { x: e.clientX, y: e.clientY };
@@ -68,28 +68,34 @@ export function OffenseDot({ p, hasBall, onPass, onMove }: OffenseProps) {
     const t = e.currentTarget as SVGCircleElement;
     if (t.hasPointerCapture(e.pointerId)) t.releasePointerCapture(e.pointerId);
     setDragging(false);
-    if (!movedRef.current) onPass(p.id);
+    if (!movedRef.current && interactive) onPass(p.id);
   };
 
+  const cursor = !interactive ? "default" : dragging ? "grabbing" : "grab";
+
   return (
-    <g style={{ cursor: dragging ? "grabbing" : "grab" }}>
+    <motion.g
+      initial={false}
+      animate={{ x: p.x, y: p.y }}
+      transition={dragging ? { duration: 0 } : { type: "spring", stiffness: 150, damping: 20 }}
+      style={{ cursor }}
+    >
       {showQuality && !hasBall && (
-        <motion.circle
-          cx={p.x}
-          cy={p.y}
+        <circle
+          cx={0}
+          cy={0}
           r={24}
           fill="none"
           stroke={qualityColor(nearestDist)}
+          strokeOpacity={0.9}
           strokeWidth={2.5}
           strokeDasharray="4 3"
-          initial={false}
-          animate={{ opacity: 0.9 }}
           pointerEvents="none"
         />
       )}
       <circle
-        cx={p.x}
-        cy={p.y}
+        cx={0}
+        cy={0}
         r={14}
         fill={hasBall ? "#15803d" : "#22c55e"}
         stroke="#052e16"
@@ -99,8 +105,8 @@ export function OffenseDot({ p, hasBall, onPass, onMove }: OffenseProps) {
         onPointerUp={onPointerUp}
       />
       <text
-        x={p.x}
-        y={p.y + 4}
+        x={0}
+        y={4}
         textAnchor="middle"
         fill="white"
         fontSize={11}
@@ -110,7 +116,7 @@ export function OffenseDot({ p, hasBall, onPass, onMove }: OffenseProps) {
       >
         {p.id}
       </text>
-    </g>
+    </motion.g>
   );
 }
 
