@@ -6,6 +6,7 @@ import { ZoneOverlays } from "./components/ZoneOverlays";
 import { SlideTrails } from "./components/SlideTrails";
 import { PlayBanner } from "./components/PlayBanner";
 import { PlayTransport } from "./components/PlayTransport";
+import { ShotAnimation } from "./components/ShotAnimation";
 import { usePlayRunner } from "./hooks/usePlayRunner";
 
 export default function App() {
@@ -63,6 +64,7 @@ export default function App() {
               />
             ))}
             <Ball x={holder.x} y={holder.y} />
+            <ShotAnimation />
           </Court>
         </div>
         <div style={{ width: "100%", maxWidth: 1400, margin: "0 auto" }}>

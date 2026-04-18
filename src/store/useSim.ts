@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { FORMATIONS, type FormationKey, type PlayerPos } from "../data/formations";
 import { SLIDES, type DefenseKey, type Slide } from "../data/defenseSlides";
 import { classifyBall, isLeftHalf, mirrorX, type BallZone } from "../data/ballZones";
-import { PLAYS, type PlayOutcome, findPlay } from "../data/plays";
+import { PLAYS, type PlayOutcome, type ShotInfo, findPlay } from "../data/plays";
 
 export type DefenderId = "X1" | "X2" | "X3" | "X4" | "X5";
 const DEFENDER_IDS: DefenderId[] = ["X1", "X2", "X3", "X4", "X5"];
@@ -28,6 +28,8 @@ type SimState = {
   currentStep: number;       // index of the step that has been (or is being) applied
   isPlaying: boolean;
   playSpeed: 0.5 | 1 | 2;
+  activeShot: ShotInfo | null;
+  shotId: number;            // increments each shot so UI can remount animations
 
   // Sandbox actions
   passTo: (playerId: string) => void;
@@ -49,6 +51,9 @@ type SimState = {
   rewindPlay: () => void;
   setPlaySpeed: (n: 0.5 | 1 | 2) => void;
   exitPlay: () => void;
+
+  triggerShot: (shot: ShotInfo) => void;
+  clearShot: () => void;
 };
 
 let closeoutTimer: ReturnType<typeof setTimeout> | null = null;
@@ -144,6 +149,8 @@ export const useSim = create<SimState>((set, get) => ({
   currentStep: -1,
   isPlaying: false,
   playSpeed: 1,
+  activeShot: null,
+  shotId: 0,
 
   passTo: (playerId) => {
     const { offense, activeDefense, defenders: currentDefenders, passId } = get();
@@ -228,6 +235,7 @@ export const useSim = create<SimState>((set, get) => ({
       outcome,
       currentStep: -1,
       isPlaying: false,
+      activeShot: null,
     });
   },
 
@@ -293,6 +301,7 @@ export const useSim = create<SimState>((set, get) => ({
       prevDefenders: null,
       currentStep: target,
       isPlaying: false,
+      activeShot: null,
     });
   },
 
@@ -311,8 +320,15 @@ export const useSim = create<SimState>((set, get) => ({
       isPlaying: false,
       currentStep: -1,
       outcome: "offenseWins",
+      activeShot: null,
     });
   },
+
+  triggerShot: (shot) => {
+    set((s) => ({ activeShot: shot, shotId: s.shotId + 1 }));
+  },
+
+  clearShot: () => set({ activeShot: null }),
 }));
 
 export { PLAYS };

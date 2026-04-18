@@ -77,7 +77,7 @@ export function OffenseDot({ p, hasBall, interactive, onPass, onMove }: OffenseP
     <motion.g
       initial={false}
       animate={{ x: p.x, y: p.y }}
-      transition={dragging ? { duration: 0 } : { type: "spring", stiffness: 150, damping: 20 }}
+      transition={dragging ? { duration: 0 } : { type: "tween", duration: 0.55, ease: "easeInOut" }}
       style={{ cursor }}
     >
       {showQuality && !hasBall && (
@@ -152,6 +152,8 @@ export function DefenderDot({ d }: { d: DefenderPos }) {
 }
 
 export function Ball({ x, y }: { x: number; y: number }) {
+  const activeShot = useSim((s) => s.activeShot);
+  if (activeShot) return null; // shot animation renders its own ball
   return (
     <motion.circle
       initial={false}

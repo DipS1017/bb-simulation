@@ -6,9 +6,11 @@ import { findPlay } from "../data/plays";
 // and applies each step's actions (via existing moveOffense / passTo store
 // actions, which already trigger defender slides). When playing, schedules
 // setTimeout to advance to the next step after step.duration / playSpeed.
-//
-// `appliedKeyRef` prevents re-applying the same step when unrelated store
-// state toggles (e.g. pause/resume at the same step).
+// If a step carries a `shot`, the runner triggers the shot animation and
+// clears it ~50ms before the step's duration ends so the next step starts
+// fresh.
+
+const SHOT_TAIL_MS = 100; // leave a tiny window before advance
 
 export function usePlayRunner() {
   const activePlayId = useSim((s) => s.activePlayId);
@@ -19,6 +21,8 @@ export function usePlayRunner() {
   const passTo = useSim((s) => s.passTo);
   const moveOffense = useSim((s) => s.moveOffense);
   const pause = useSim((s) => s.pause);
+  const triggerShot = useSim((s) => s.triggerShot);
+  const clearShot = useSim((s) => s.clearShot);
 
   const appliedKeyRef = useRef<string | null>(null);
 
@@ -41,26 +45,27 @@ export function usePlayRunner() {
     }
 
     const key = `${activePlayId}|${outcome}|${currentStep}`;
+    const step = steps[currentStep];
     if (appliedKeyRef.current !== key) {
-      const step = steps[currentStep];
       for (const a of step.actions) {
         if (a.kind === "move") moveOffense(a.id, a.x, a.y);
         else if (a.kind === "pass") passTo(a.to);
       }
+      if (step.shot) triggerShot(step.shot);
       appliedKeyRef.current = key;
     }
 
     if (!isPlaying) return;
 
-    const step = steps[currentStep];
     const delay = step.duration / playSpeed;
     const t = setTimeout(() => {
+      if (step.shot) clearShot();
       if (currentStep + 1 < steps.length) {
         useSim.setState({ currentStep: currentStep + 1 });
       } else {
         useSim.setState({ isPlaying: false });
       }
-    }, delay);
+    }, Math.max(100, delay - SHOT_TAIL_MS));
     return () => clearTimeout(t);
-  }, [activePlayId, outcome, currentStep, isPlaying, playSpeed, passTo, moveOffense, pause]);
+  }, [activePlayId, outcome, currentStep, isPlaying, playSpeed, passTo, moveOffense, pause, triggerShot, clearShot]);
 }
